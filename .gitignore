@@ -1,0 +1,15 @@
+# Private notes
+IDEAS.md
+
+# Local Claude Code session files
+.claude/
+
+# Types the engine writes into each mod while developing
+**/.claude-plugin/types/
+**/.mcpb-cache/
+
+# OS / editor / logs
+.DS_Store
+*~
+*.swp
+*.log

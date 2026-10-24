@@ -1,0 +1,10 @@
+{
+  "name": "plugins-lab",
+  "owner": {
+    "name": "Jansen Lazaro"
+  },
+  "metadata": {
+    "description": "Jansen Lazaro's lab of Claude Code plugins: mods, skills, slash commands, agents and hooks."
+  },
+  "plugins": []
+}
