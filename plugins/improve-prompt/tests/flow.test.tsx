@@ -106,12 +106,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     expect(await ui.find({ type: 'Text', text: /A FEW QUICK QUESTIONS/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /Round 1 of up to 3/ })).toBeDefined()
-    expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('0 of 2')
+    expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('2 of 2')
     expect(await ui.find({ type: 'Text', text: /settings page/ })).toBeDefined()
     expect(seen.fork[0]).toContain('add dark mode')
 
     // The first answer is typed under "Other", the second picked.
     await ui.press({ key: 'other-0' })
+    // An empty "Other" field takes away the Recommended answer.
+    expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('1 of 2')
     await ui.input({ key: 'answer-0', text: 'In the sidebar.' })
     await ui.press({ key: 'pick-1-0' })
     expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('2 of 2')
@@ -267,9 +269,52 @@ test('each question starts with its Recommended answer picked and marked', async
   expect((await ui.find({ key: 'pick-0-0' }))?.text).toContain('●  In settings  · recommended')
   expect((await ui.find({ key: 'pick-0-1' }))?.text).toContain('○  In the header')
   expect((await ui.find({ key: 'pick-0-1' }))?.text).not.toContain('recommended')
-  // Every question already has an answer, so Continue shows from the start.
+  // Every question already has an answer: the count, badges and Continue agree.
   expect(await ui.find({ key: 'next' })).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('0 of 2')
+  expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('2 of 2')
+  expect(await ui.find({ type: 'Text', text: /^ 1 $/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('text typed under Other but not entered keeps Continue and is sent', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(DONE), answered(WRITTEN)] })
+
+  await ui.press({ key: 'other-0' })
+  expect(await ui.find({ key: 'next' })).toBeUndefined()
+  await ui.input({ key: 'answer-0', text: 'In the sidebar.', kind: 'change' })
+  expect(await ui.find({ key: 'next' })).toBeDefined()
+  await ui.press({ key: 'next' })
+  expect(seen.fork[1]).toContain('Answer: In the sidebar.')
+  await ui.unmount()
+})
+
+test('"Write it now" skips an empty Other field and keeps the other Recommended answers', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(WRITTEN)] })
+
+  await ui.press({ key: 'other-0' })
+  expect((await ui.find({ key: 'write-now' }))?.text).toBe('Write it now')
+  await ui.press({ key: 'write-now' })
+  expect(seen.fork[1]).toContain('Skipped: leave this out of the prompt.')
+  expect(seen.fork[1]).toContain('Answer: Follow the system')
+  await ui.unmount()
+})
+
+test('a question with no Options has no answer until the person gives one', async ($, on) => {
+  const noOptions = JSON.stringify({
+    done: false,
+    questions: [
+      { question: 'What should the toggle be called?', options: [] },
+      { question: 'Which theme should it start in?', options: ['Follow the system', 'Light'] },
+    ],
+  })
+  const { seen, ui } = await start($, on, { fork: [answered(noOptions), answered(WRITTEN)] })
+
+  expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('1 of 2')
+  expect(await ui.find({ key: 'next' })).toBeUndefined()
+  await ui.press({ key: 'pick-1-1' })
+  await ui.press({ key: 'write-now' })
+  expect(seen.fork[1]).toContain('Skipped: leave this out of the prompt.')
+  expect(seen.fork[1]).toContain('Answer: Light')
   await ui.unmount()
 })
 
