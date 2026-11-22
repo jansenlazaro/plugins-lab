@@ -8,12 +8,12 @@ A Claude Code mod that turns a rough prompt, or just a goal, into a better promp
 
 A pane opens beside the chat and walks through four steps: Your prompt, Questions, Rewrite, Review.
 
-Claude asks up to three clarifying questions at a time, each with a few options to pick from. The first option is the one Claude recommends.
+Claude asks up to three clarifying questions at a time, each with a few options to pick from. The first option is the one Claude recommends: it is marked **recommended** and starts out picked (●), so you only need to touch the questions where you want something else.
 
 - Pick an option, or choose **Other (type it)** to write your own answer.
-- **Skip** leaves a question out of the prompt. **change** reopens an answered one.
+- **Skip** leaves a question out of the prompt. **change** reopens an answered one, with the recommended option picked again.
 - **Continue** sends your answers. Claude asks again only about what's still open, for three rounds at most. A line above the questions shows where you are, such as "Round 2 of up to 3". After the third round the prompt is written.
-- **Skip the rest, write it now** stops early and writes the prompt.
+- **Write it now** stops early and writes the prompt. A question you left as it was uses its recommended option.
 
 The Review step shows your prompt beside the refined one, the word counts, and a list of what was added:
 

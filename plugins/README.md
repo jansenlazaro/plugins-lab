@@ -32,8 +32,10 @@ Check any plugin with `claude plugin validate plugins/<name>`, and test a mod wi
 - A mod's own hook does not run for a `$` call the mod makes itself. For example, its `ui.close` hook fires when the person presses Esc, but not when the mod calls `$.ui.close`. Do the clean-up at the call as well.
 - `update($, atom, fn)` resolves to the value it wrote, so there is no need to `read` again afterwards.
 - Change an atom's `shape` tag whenever the stored value's fields change. A value written by an earlier version is then treated as absent.
+- Work out a value that follows from others where it is used, rather than storing a copy in state. For example, a default answer can be read from the question when nothing was picked. A stored copy needs a flag to keep it in step, and adding one changes the stored fields, which needs a new `shape` tag and drops saved values.
 - A model call can come back after its pane was closed or a new run started. Tag each run with an id that never repeats, even after the state is cleared, and drop replies whose id no longer matches.
 - Use the test kit's `mock.clock(on).settle()` to let pending work finish. Timers such as `setTimeout` don't type-check in a mod.
+- A test can't see where a mod moves the focus: a test's `ui.focus` hook does not fire for the mod's own `$.ui.focus` calls, even with `{ plugin: '*' }`. Work out the key to focus in a plain function of the mod's state and test that function directly.
 
 ## Glossaries
 

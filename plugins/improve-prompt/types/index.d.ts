@@ -4,7 +4,10 @@
  */
 export type Question = { text: string; options: string[] }
 
-/** What the person has done with one question of the current Round so far. */
+/**
+ * What the person has done with one question of the current Round so far. While
+ * they have done nothing, the question's Recommended answer stands as picked.
+ */
 export type Reply = {
   /** The answer chosen: an Option, or what they typed. Empty while open. */
   choice: string
