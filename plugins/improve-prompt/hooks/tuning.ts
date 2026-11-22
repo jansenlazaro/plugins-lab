@@ -22,7 +22,6 @@ export function detectModel(raw: string, isPlanMode: boolean): ModelRef | undefi
     .replace(/@.*$/, '') // "@20251001"
     .replace(/-v\d+:\d+$/, '') // "-v1:0"
     .replace(/-\d{8}$/, '') // "-20251001"
-    .replace(/-latest$/, '')
   const name = id === 'opusplan' ? (isPlanMode ? 'opus' : 'sonnet') : id
   return MODELS.find(m => m.ids.includes(name) || m.aliases.includes(name))
 }
@@ -33,8 +32,10 @@ export async function loadTuning($: EngineInterface, isPlanMode: boolean): Promi
     const ref = detectModel(await $.session.model(), isPlanMode)
     if (!ref) return undefined
     const folder = `${$.plugin.root}/references`
-    const general = await $.fs.read(`${folder}/${GENERAL_DOC}`)
-    const specific = await $.fs.read(`${folder}/${ref.doc}`)
+    const [general, specific] = await Promise.all([
+      $.fs.read(`${folder}/${GENERAL_DOC}`),
+      $.fs.read(`${folder}/${ref.key}.md`),
+    ])
     if (typeof general !== 'string' || typeof specific !== 'string') return undefined
     return { model: ref.name, rules: `${general.trim()}\n\n${specific.trim()}` }
   } catch {

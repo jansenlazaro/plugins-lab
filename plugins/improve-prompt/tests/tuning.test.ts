@@ -42,14 +42,10 @@ for (const raw of ['claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claud
 
 // ----- the reference map -----
 
-test('reference map: every model has its own key and its own doc, named after the key', () => {
+test('reference map: every model has its own key, and none can clash with the general doc', () => {
   expect(GENERAL_DOC).toBe('general.md')
   expect(new Set(MODELS.map(m => m.key)).size).toBe(MODELS.length)
-  expect(new Set(MODELS.map(m => m.doc)).size).toBe(MODELS.length)
-  for (const model of MODELS) {
-    expect(model.doc).toBe(`${model.key}.md`)
-    expect(model.doc).not.toBe(GENERAL_DOC)
-  }
+  for (const model of MODELS) expect(`${model.key}.md`).not.toBe(GENERAL_DOC)
 })
 
 test('reference map: a model name or id belongs to one model only', () => {

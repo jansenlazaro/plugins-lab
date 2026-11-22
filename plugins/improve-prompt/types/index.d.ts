@@ -53,10 +53,8 @@ export type Run = {
   refined: string
   /** What the Refined prompt adds to the Seed, one short line each. */
   added: string[]
-  /** The model the Refined prompt was tuned for; empty when it was not. */
-  tunedFor: string
-  /** What the tuning changed in the Refined prompt, one line each (Tweaks). */
-  tweaks: string[]
+  /** The model the Refined prompt was tuned for and the Tweaks that made, or null when none were. */
+  tuned: { model: string; tweaks: string[] } | null
   /** The Redo note as typed. */
   note: string
   error: string

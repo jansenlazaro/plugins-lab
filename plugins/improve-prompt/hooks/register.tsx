@@ -57,8 +57,7 @@ function newRun(id: number, seed: string, useContext: boolean): Run {
     answered: [],
     refined: '',
     added: [],
-    tunedFor: '',
-    tweaks: [],
+    tuned: null,
     note: '',
     error: '',
     notice: '',
@@ -166,14 +165,13 @@ async function rewrite($: $, id: number, call: 'write' | 'redo', from: Phase, pr
   const { refined, added, tweaks } = parseRefined(answer.text)
   if (!refined) return fail($, id, 'Claude replied with an empty prompt.')
   // Tweaks only count when a Model reference was sent to be applied.
-  const kept = tuning ? tweaks : []
+  const tuned = tuning && tweaks.length > 0 ? { model: tuning.model, tweaks } : null
   await patch($, id, r => ({
     ...r,
     phase: 'result',
     refined,
     added,
-    tunedFor: kept.length > 0 && tuning ? tuning.model : '',
-    tweaks: kept,
+    tuned,
     note: '',
   }))
 }
@@ -319,7 +317,9 @@ export const register: Register = (on, options) => {
 
   // Remember the mode each prompt was sent in. The hook only watches.
   on('classic.UserPromptSubmit', async ($, e, next) => {
-    await update($, permissionMode, () => e.permission_mode ?? '')
+    // Most prompts change nothing: skip the write then.
+    const mode = e.permission_mode ?? ''
+    if ((await read($, permissionMode)) !== mode) await update($, permissionMode, () => mode)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -387,6 +387,18 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
         <Text dimColor>YOUR PROMPT</Text>
         <Text maxLines={4}>{run.seed}</Text>
+      </Box>
+    )
+    /** A dim title over lines that each start with a mark. */
+    const bulletList = (title: string, mark: string, lines: readonly string[]) => (
+      <Box flexDirection="column">
+        <Text dimColor>{title}</Text>
+        {lines.map((line, i) => (
+          <Box key={`${mark}-${i}`} flexDirection="row" columnGap={1}>
+            <Text color="success">{mark}</Text>
+            <Text>{line}</Text>
+          </Box>
+        ))}
       </Box>
     )
     const notice = run.notice ? <Text dimColor>{run.notice}</Text> : null
@@ -483,9 +495,9 @@ export const register: Register = (on, options) => {
                 {run.added.length} {run.added.length === 1 ? 'detail' : 'details'} added
               </Text>
             )}
-            {run.tweaks.length > 0 && (
+            {run.tuned && (
               <Text color="success">
-                {run.tweaks.length} model {run.tweaks.length === 1 ? 'tweak' : 'tweaks'}
+                {run.tuned.tweaks.length} model {run.tuned.tweaks.length === 1 ? 'tweak' : 'tweaks'}
               </Text>
             )}
           </Box>
@@ -502,28 +514,8 @@ export const register: Register = (on, options) => {
             <Button key="copy" plain hotkey="c" label="Copy" onPress={press => act(copyPrompt($, id, press.surface), $)} />
             {cancel}
           </Box>
-          {run.added.length > 0 && (
-            <Box flexDirection="column">
-              <Text dimColor>WHAT I ADDED</Text>
-              {run.added.map((line, i) => (
-                <Box key={`added-${i}`} flexDirection="row" columnGap={1}>
-                  <Text color="success">+</Text>
-                  <Text>{line}</Text>
-                </Box>
-              ))}
-            </Box>
-          )}
-          {run.tweaks.length > 0 && (
-            <Box flexDirection="column">
-              <Text dimColor>TUNED FOR {run.tunedFor.toUpperCase()}</Text>
-              {run.tweaks.map((line, i) => (
-                <Box key={`tweak-${i}`} flexDirection="row" columnGap={1}>
-                  <Text color="success">~</Text>
-                  <Text>{line}</Text>
-                </Box>
-              ))}
-            </Box>
-          )}
+          {run.added.length > 0 && bulletList('WHAT I ADDED', '+', run.added)}
+          {run.tuned && bulletList(`TUNED FOR ${run.tuned.model.toUpperCase()}`, '~', run.tuned.tweaks)}
           {notice}
           <Box
             flexDirection={isWide ? 'row' : 'column'}

@@ -186,8 +186,9 @@ function cleanPrompt(text: string): string {
 
 // The ADDED_MARK line, or a variant a model may write: "## Added", "Added:".
 const ADDED_LINE = /^\s*(?:={3,}\s*added\s*={3,}|#{1,6}\s*(?:what i )?added\b[^\n]*|added\s*:)\s*$/im
-// The TUNED_MARK line, or a variant: "## Tuned for Claude Opus 5.5", "Tweaks:".
-const TUNED_LINE = /^\s*(?:={3,}\s*tuned\s*={3,}|#{1,6}\s*(?:tuned|tweaks|model tweaks)\b[^\n]*|(?:tuned|tweaks)\s*:)\s*$/im
+// The TUNED_MARK line. Unlike the ADDED one it takes no header variants, which could
+// cut a prompt that has a "Tweaks:" line of its own.
+const TUNED_LINE = /^\s*={3,}\s*tuned\s*={3,}\s*$/im
 
 /** The lines of a list section, without their bullets, at most `max` of them. */
 function listLines(text: string, max: number): string[] {

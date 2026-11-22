@@ -34,7 +34,7 @@ for (const mark of ['===ADDED===', '=== Added ===', '## Added', '## What I added
   })
 }
 
-for (const mark of ['===TUNED===', '=== Tuned ===', '## Tuned for Claude Opus 5.5', 'Tweaks:']) {
+for (const mark of ['===TUNED===', '=== Tuned ===']) {
   test(`refined: "${mark}" splits off the list of tweaks`, () => {
     const { refined, added, tweaks } = parseRefined(`Do the thing.\n===ADDED===\n- One\n${mark}\n- Ran a real check, because it skips them\n* Two`)
     expect(refined).toBe('Do the thing.')
@@ -55,6 +55,11 @@ test('refined: lists written in the other order are each kept to their own', () 
   expect(refined).toBe('Do the thing.')
   expect(added).toEqual(['A1'])
   expect(tweaks).toEqual(['T1'])
+})
+
+test('refined: a heading that only looks like a tweak list is part of the prompt', () => {
+  const prompt = 'Do the thing.\n## Tweaks\nKeep it short.'
+  expect(parseRefined(prompt)).toEqual({ refined: prompt, added: [], tweaks: [] })
 })
 
 test('refined: a reply with no tweak list has no tweaks', () => {
