@@ -98,6 +98,11 @@ ${run.refined}
 </previous>`
 }
 
+/** The Recommended answer: the model is told to list it first. */
+export function recommended(question: Question): string | undefined {
+  return question.options[0]
+}
+
 /**
  * Reads a Round from the model's reply: the questions, `[]` when the model is
  * done, or undefined when the reply holds no JSON the mod understands.

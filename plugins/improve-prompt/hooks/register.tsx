@@ -8,6 +8,7 @@ import {
   countWords,
   parseQuestions,
   parseRefined,
+  recommended,
   redoPrompt,
   writePrompt,
 } from './prompts'
@@ -16,14 +17,7 @@ const PANE = 'improve-prompt'
 // The model used when the run does not read the session.
 const ALONE_MODEL = 'sonnet'
 const NO_CONVERSATION = 'No conversation yet, so this run works from your text alone.'
-const EMPTY_REPLY: Reply = {
-  choice: '',
-  isTyped: false,
-  isSkipped: false,
-  isTyping: false,
-  isProposed: false,
-  text: '',
-}
+const EMPTY_REPLY: Reply = { choice: '', isTyped: false, isSkipped: false, isTyping: false, text: '' }
 const STEPS = ['Your prompt', 'Questions', 'Rewrite', 'Review'] as const
 const DOING: Record<Call, string> = {
   ask: 'Checking what would make this better',
@@ -34,7 +28,7 @@ const DOING: Record<Call, string> = {
 // Change the tag when Run's fields change: a value an earlier version stored
 // is then read as no run at all.
 const runState = atom({ plugin: 'improve-prompt', key: 'run' } as const, null as Run | null, {
-  shape: 'run-4',
+  shape: 'run-3',
 })
 // Run ids never repeat, even after a close clears the run: a model call still
 // out from a closed run must not match the next one.
@@ -144,7 +138,7 @@ async function askRound($: $, id: number, from: Phase, prep: Prep = same): Promi
     phase: 'asking',
     round: r.round + 1,
     questions,
-    replies: questions.map(proposed),
+    replies: questions.map(() => EMPTY_REPLY),
   }))
 }
 
@@ -161,20 +155,17 @@ async function rewrite($: $, id: number, call: 'write' | 'redo', from: Phase, pr
   await patch($, id, r => ({ ...r, phase: 'result', refined, added, note: '' }))
 }
 
-/** A question's reply before the person touches it: its Recommended answer, picked. */
-function proposed(question: Question): Reply {
-  const first = question.options[0]
-  return first ? { ...EMPTY_REPLY, choice: first, isProposed: true } : EMPTY_REPLY
-}
-
-/** True when the question has an answer, the Recommended answer left as it was included. */
-function hasAnswer(reply: Reply): boolean {
+/** True when the person has settled the question themselves. */
+function isSettled(reply: Reply): boolean {
   return reply.isSkipped || reply.choice !== ''
 }
 
-/** True when the person has settled the question themselves. */
-function isChosen(reply: Reply): boolean {
-  return reply.isSkipped || (reply.choice !== '' && !reply.isProposed)
+/**
+ * True when the question would send an answer now: one the person settled, or
+ * else its Recommended answer, which stands while no "Other" field is open.
+ */
+function hasAnswer(question: Question, reply: Reply): boolean {
+  return isSettled(reply) || (!reply.isTyping && recommended(question) !== undefined)
 }
 
 /**
@@ -188,8 +179,10 @@ function settle(run: Run): Run {
     const typing = reply.isTyping ? reply.text.trim() : ''
     if (reply.isSkipped) return { question: q.text, kind: 'skipped', text: '' }
     if (typing) return { question: q.text, kind: 'typed', text: typing }
-    if (!reply.choice) return { question: q.text, kind: 'skipped', text: '' }
-    return { question: q.text, kind: reply.isTyped ? 'typed' : 'picked', text: reply.choice }
+    if (reply.choice) return { question: q.text, kind: reply.isTyped ? 'typed' : 'picked', text: reply.choice }
+    // Left as it was: the Recommended answer stands, unless an empty "Other" field is open.
+    const standing = reply.isTyping ? undefined : recommended(q)
+    return standing ? { question: q.text, kind: 'picked', text: standing } : { question: q.text, kind: 'skipped', text: '' }
   })
   return { ...run, answered: [...run.answered, ...answered], questions: [], replies: [] }
 }
@@ -238,7 +231,7 @@ async function answer($: $, id: number, index: number, change: Partial<Reply>): 
   let next = -1
   for (let step = 1; step < count && next < 0; step++) {
     const i = (index + step) % count
-    if (!isChosen(run.replies[i] ?? EMPTY_REPLY)) next = i
+    if (!isSettled(run.replies[i] ?? EMPTY_REPLY)) next = i
   }
   const key =
     next < 0
@@ -295,13 +288,13 @@ function act(work: Promise<unknown>, $: $): void {
 }
 
 /** Where the run stands, for the step bar and the status in the corner. */
-function progress(run: Run, chosen: number): { step: number; status: string } {
+function progress(run: Run, settled: number): { step: number; status: string } {
   const isAsk = run.busy === 'ask'
   switch (run.phase) {
     case 'seed':
       return { step: 0, status: 'Start here' }
     case 'asking':
-      return { step: 1, status: `${chosen} of ${run.questions.length} answered` }
+      return { step: 1, status: `${settled} of ${run.questions.length} answered` }
     case 'result':
       return { step: 3, status: 'Ready to use' }
     case 'error':
@@ -360,8 +353,8 @@ export const register: Register = (on, options) => {
 
     // ----- the parts every screen shares -----
 
-    const chosen = run.replies.filter(isChosen).length
-    const { step, status } = progress(run, chosen)
+    const settled = run.replies.filter(isSettled).length
+    const { step, status } = progress(run, settled)
 
     const stepMark = (i: number) =>
       i < step ? (
@@ -549,7 +542,7 @@ export const register: Register = (on, options) => {
 
     // asking
     const isLastRound = run.round >= MAX_ROUNDS
-    const isAllSettled = run.replies.every(hasAnswer)
+    const isAllAnswered = run.questions.every((q, i) => hasAnswer(q, run.replies[i] ?? EMPTY_REPLY))
     const rule = <Text dimColor>{'─'.repeat(Math.max(10, Math.min(e.props.bodyColumns - 2, 100)))}</Text>
     return (
       <Box flexDirection="column" gap={1}>
@@ -571,11 +564,11 @@ export const register: Register = (on, options) => {
         </Box>
         {run.questions.map((question, i) => {
           const reply = run.replies[i] ?? EMPTY_REPLY
-          const reopen = () => void patch($, id, r => setReply(r, i, proposed(question)))
+          const reopen = () => void patch($, id, r => setReply(r, i, EMPTY_REPLY))
           return (
             <Box key={`question-${i}`} flexDirection="column" gap={0}>
               <Box flexDirection="row" columnGap={1}>
-                {isChosen(reply) ? (
+                {isSettled(reply) ? (
                   <Text backgroundColor="success" color="inverseText" bold>
                     {' ✓ '}
                   </Text>
@@ -586,7 +579,7 @@ export const register: Register = (on, options) => {
                 )}
                 <Text bold>{question.text}</Text>
               </Box>
-              {isChosen(reply) ? (
+              {isSettled(reply) ? (
                 <Box flexDirection="row" columnGap={3} paddingLeft={5}>
                   {reply.isSkipped ? (
                     <Text dimColor italic>
@@ -620,7 +613,8 @@ export const register: Register = (on, options) => {
                       key={`pick-${i}-${j}`}
                       plain
                       autoFocus={i === 0 && j === 0 ? true : undefined}
-                      label={`${option === reply.choice ? '●' : '○'}  ${option}${j === 0 ? '  · recommended' : ''}`}
+                      // Unsettled, so the Recommended answer (the first) stands as picked.
+                      label={j === 0 ? `●  ${option}  · recommended` : `○  ${option}`}
                       onPress={() => void answer($, id, i, { choice: option })}
                     />
                   ))}
@@ -633,7 +627,7 @@ export const register: Register = (on, options) => {
         })}
         {rule}
         <Box flexDirection="row" flexWrap="wrap" columnGap={3}>
-          {isAllSettled && (
+          {isAllAnswered && (
             <Button
               key="next"
               variant="primary"
@@ -641,11 +635,12 @@ export const register: Register = (on, options) => {
               onPress={() => void submitRound($, id, false)}
             />
           )}
-          {!(isAllSettled && isLastRound) && (
+          {/* "Skip the rest" shows only while an "Other" field is open or a question has no Options. */}
+          {!(isAllAnswered && isLastRound) && (
             <Button
               key="write-now"
-              variant={isAllSettled ? undefined : 'primary'}
-              label={isAllSettled ? 'Write it now' : 'Skip the rest, write it now'}
+              variant={isAllAnswered ? undefined : 'primary'}
+              label={isAllAnswered ? 'Write it now' : 'Skip the rest, write it now'}
               onPress={() => void submitRound($, id, true)}
             />
           )}

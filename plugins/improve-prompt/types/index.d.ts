@@ -5,8 +5,8 @@
 export type Question = { text: string; options: string[] }
 
 /**
- * What the person has done with one question of the current Round so far. A
- * question starts with its Recommended answer picked.
+ * What the person has done with one question of the current Round so far. While
+ * they have done nothing, the question's Recommended answer stands as picked.
  */
 export type Reply = {
   /** The answer chosen: an Option, or what they typed. Empty while open. */
@@ -16,11 +16,6 @@ export type Reply = {
   isSkipped: boolean
   /** True while the "Other" field is open. */
   isTyping: boolean
-  /**
-   * True while `choice` is the Recommended answer the mod picked, which the
-   * person has not yet confirmed or changed.
-   */
-  isProposed: boolean
   /** The "Other" field as typed. */
   text: string
 }
