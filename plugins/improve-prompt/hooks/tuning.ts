@@ -18,7 +18,7 @@ export function detectModel(raw: string, isPlanMode: boolean): ModelRef | undefi
     .trim()
     .toLowerCase()
     .replace(/\[[^\]]*\]$/, '') // "[1m]"
-    .replace(/^(?:[a-z]{2}\.)?anthropic\./, '') // "us.anthropic."
+    .replace(/^(?:[a-z-]+\.)?anthropic\./, '') // "us.anthropic.", "global.anthropic."
     .replace(/@.*$/, '') // "@20251001"
     .replace(/-v\d+:\d+$/, '') // "-v1:0"
     .replace(/-\d{8}$/, '') // "-20251001"

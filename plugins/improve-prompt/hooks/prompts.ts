@@ -73,7 +73,7 @@ function shape(tuning?: Tuning): string {
   if (!tuning) return `${SHAPE}\n\n${ADDED_FORMAT}`
   return `${SHAPE}
 
-The person will send this prompt to ${tuning.model}. The rules below say how to write for that model. Apply the ones that fit this prompt, and only those: a rule that does not fit leaves no trace in the prompt, and the prompt stays as short as it can be.
+The person will send this prompt to ${tuning.model}. The rules below say how to write for that model. Where the model's own rules differ from the general ones, the model's win. Apply the ones that fit this prompt, and only those: a rule that does not fit leaves no trace in the prompt, and the prompt stays as short as it can be.
 
 <model_rules for="${tuning.model}">
 ${tuning.rules}

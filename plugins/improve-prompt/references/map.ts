@@ -1,7 +1,7 @@
 // The Reference map: which Model reference to load for which Session model.
 //
 // Only the Model reference of the model in use is read, with GENERAL_DOC, so
-// a run loads a few small files instead of every guide.
+// a run loads a few small files instead of every Model reference.
 //
 // To support a model: add `<key>.md` next to this file (one condensed rule per
 // line, each with a link to its source section) and one entry below.

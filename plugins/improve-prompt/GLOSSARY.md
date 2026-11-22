@@ -67,3 +67,7 @@ _Avoid_: Registry, index
 **Tweak**:
 One line in the "Tuned for" list, naming a change the Refined prompt got because of a rule in the Model reference, and the rule behind it. Shown only when the Session model has a Model reference.
 _Avoid_: Change, adjustment, Addition
+
+**Tuning**:
+The code's name for what a write or rewrite is given when the Session model has a Model reference: the model's name and the rules of the general doc and its own doc together.
+_Avoid_: Profile, config
