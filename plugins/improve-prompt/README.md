@@ -31,11 +31,19 @@ claude plugin validate plugins/improve-prompt
 claude plugin test plugins/improve-prompt
 ```
 
-The tests in `tests/` cover the flow on the terminal and desktop surfaces, and the parsing of Claude's replies.
+The tests in `tests/` cover the flow on the terminal and desktop surfaces, the parsing of Claude's replies, finding the session's model and loading its Model reference, and the list of tweaks.
+
+## Tuned for your model
+
+The mod reads your session's model each time it writes or rewrites the prompt. For the current models, Claude Fable 5.2 (and Mythos 5.2), Opus 5.5, Sonnet 5.5 and Haiku 5.5, it loads that model's Model reference, plus a shared general one, and writes the prompt the way Anthropic's [prompting guide](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices) advises for that model. The Review step then lists each tweak it made under **Tuned for**, with the rule behind it.
+
+Any other model, or a Model reference that can't be read, gets the plain prompt, with no warning and no list. Under `opusplan` the mod tunes for Opus when the last prompt was sent in plan mode, and for Sonnet otherwise.
+
+Only the docs for your model are read. The questions are never tuned, only the written prompt. The docs are in `references/`, each rule linked to its source section, and `references/map.ts` says which doc goes with which model. To add a model, add its doc and one line to the map.
 
 ## Session context
 
-By default the questions and the refined prompt draw on the current conversation, so Claude knows what you're working on. Those calls reuse the conversation on your session's model. Turn it off for one run with the toggle in the pane, or for every run with the plugin's **Use session context** setting in `/config`. With context off, or before the conversation has started, the mod uses Sonnet and sees only your text and answers.
+By default the questions and the refined prompt draw on the current conversation, so Claude knows what you're working on. Those calls reuse the conversation on your session's model. Turn it off for one run with the toggle in the pane, or for every run with the plugin's **Use session context** setting in `/config`. With context off, or before the conversation has started, the mod uses Opus at low effort and sees only your text and answers.
 
 ## Install
 

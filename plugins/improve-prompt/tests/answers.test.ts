@@ -19,6 +19,7 @@ function round(questions: Question[], replies: Partial<Reply>[] = []): Run {
     answered: [],
     refined: '',
     added: [],
+    tuned: null,
     note: '',
     error: '',
     notice: '',

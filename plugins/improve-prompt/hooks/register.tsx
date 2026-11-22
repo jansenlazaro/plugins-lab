@@ -13,10 +13,13 @@ import {
   redoPrompt,
   writePrompt,
 } from './prompts'
+import { loadTuning } from './tuning'
+import type { Tuning } from './tuning'
 
 const PANE = 'improve-prompt'
-// The model used when the run does not read the session.
-const ALONE_MODEL = 'sonnet'
+// The model and effort used when the run does not read the session.
+const ALONE_MODEL = 'opus'
+const ALONE_EFFORT = 'low'
 const NO_CONVERSATION = 'No conversation yet, so this run works from your text alone.'
 const STEPS = ['Your prompt', 'Questions', 'Rewrite', 'Review'] as const
 const DOING: Record<Call, string> = {
@@ -28,11 +31,14 @@ const DOING: Record<Call, string> = {
 // Change the tag when Run's fields change: a value an earlier version stored
 // is then read as no run at all.
 const runState = atom({ plugin: 'improve-prompt', key: 'run' } as const, null as Run | null, {
-  shape: 'run-3',
+  shape: 'run-4',
 })
 // Run ids never repeat, even after a close clears the run: a model call still
 // out from a closed run must not match the next one.
 const lastId = atom({ plugin: 'improve-prompt', key: 'lastId' } as const, 0)
+// The permission mode the last prompt was sent in. Only `opusplan` needs it,
+// to tell whether the session is on Opus (plan mode) or on Sonnet.
+const permissionMode = atom({ plugin: 'improve-prompt', key: 'permissionMode' } as const, '')
 
 type $ = EngineInterface
 /** A change folded into the patch that starts a model call. */
@@ -52,6 +58,7 @@ function newRun(id: number, seed: string, useContext: boolean): Run {
     answered: [],
     refined: '',
     added: [],
+    tuned: null,
     note: '',
     error: '',
     notice: '',
@@ -99,8 +106,10 @@ async function callModel($: $, run: Run, build: (run: Run, withContext: boolean)
   }
   const done = await $.model.complete({
     model: ALONE_MODEL,
+    effort: ALONE_EFFORT,
     prompt: build(run, false),
-    maxTokens: 4000,
+    // Thinking counts toward the cap, so leave room for it.
+    maxTokens: 8000,
     timeoutMs: 180_000,
   })
   return done.isAnswered ? { isOk: true, text: done.text } : { isOk: false, error: whyNot(done) }
@@ -148,11 +157,22 @@ const BUILD = { write: writePrompt, redo: redoPrompt }
 async function rewrite($: $, id: number, call: 'write' | 'redo', from: Phase, prep: Prep = same): Promise<void> {
   const run = await begin($, id, call, from, prep)
   if (!run) return
-  const answer = await callModel($, run, BUILD[call])
+  // Read at each write, so a `/model` switch counts.
+  const tuning = await loadTuning($, (await read($, permissionMode)) === 'plan')
+  const answer = await callModel($, run, (r, withContext) => BUILD[call](r, withContext, tuning))
   if (!answer.isOk) return fail($, id, answer.error)
-  const { refined, added } = parseRefined(answer.text)
+  const { refined, added, tweaks } = parseRefined(answer.text)
   if (!refined) return fail($, id, 'Claude replied with an empty prompt.')
-  await patch($, id, r => ({ ...r, phase: 'result', refined, added, note: '' }))
+  // Tweaks only count when a Model reference was sent to be applied.
+  const tuned = tuning && tweaks.length > 0 ? { model: tuning.model, tweaks } : null
+  await patch($, id, r => ({
+    ...r,
+    phase: 'result',
+    refined,
+    added,
+    tuned,
+    note: '',
+  }))
 }
 
 /**
@@ -294,6 +314,14 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // Remember the mode each prompt was sent in. The hook only watches.
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    // Most prompts change nothing: skip the write then.
+    const mode = e.permission_mode ?? ''
+    if ((await read($, permissionMode)) !== mode) await update($, permissionMode, () => mode)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('command.run', { command: 'improve-prompt' }, async ($, e) => {
     const seed = e.args.trim()
     const id = await update($, lastId, n => n + 1)
@@ -358,6 +386,18 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" borderStyle="round" borderDimColor paddingX={1}>
         <Text dimColor>YOUR PROMPT</Text>
         <Text maxLines={4}>{run.seed}</Text>
+      </Box>
+    )
+    /** A dim title over lines that each start with a mark. */
+    const bulletList = (title: string, mark: string, lines: readonly string[]) => (
+      <Box flexDirection="column">
+        <Text dimColor>{title}</Text>
+        {lines.map((line, i) => (
+          <Box key={`${mark}-${i}`} flexDirection="row" columnGap={1}>
+            <Text color="success">{mark}</Text>
+            <Text>{line}</Text>
+          </Box>
+        ))}
       </Box>
     )
     const notice = run.notice ? <Text dimColor>{run.notice}</Text> : null
@@ -454,6 +494,11 @@ export const register: Register = (on, options) => {
                 {run.added.length} {run.added.length === 1 ? 'detail' : 'details'} added
               </Text>
             )}
+            {run.tuned && (
+              <Text color="success">
+                {run.tuned.tweaks.length} model {run.tuned.tweaks.length === 1 ? 'tweak' : 'tweaks'}
+              </Text>
+            )}
           </Box>
           <Box flexDirection="row" flexWrap="wrap" columnGap={3}>
             <Button
@@ -468,17 +513,8 @@ export const register: Register = (on, options) => {
             <Button key="copy" plain hotkey="c" label="Copy" onPress={press => act(copyPrompt($, id, press.surface), $)} />
             {cancel}
           </Box>
-          {run.added.length > 0 && (
-            <Box flexDirection="column">
-              <Text dimColor>WHAT I ADDED</Text>
-              {run.added.map((line, i) => (
-                <Box key={`added-${i}`} flexDirection="row" columnGap={1}>
-                  <Text color="success">+</Text>
-                  <Text>{line}</Text>
-                </Box>
-              ))}
-            </Box>
-          )}
+          {run.added.length > 0 && bulletList('WHAT I ADDED', '+', run.added)}
+          {run.tuned && bulletList(`TUNED FOR ${run.tuned.model.toUpperCase()}`, '~', run.tuned.tweaks)}
           {notice}
           <Box
             flexDirection={isWide ? 'row' : 'column'}

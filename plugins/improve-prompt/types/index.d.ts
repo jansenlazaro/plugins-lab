@@ -53,6 +53,8 @@ export type Run = {
   refined: string
   /** What the Refined prompt adds to the Seed, one short line each. */
   added: string[]
+  /** The model the Refined prompt was tuned for and the Tweaks that made, or null when none were. */
+  tuned: { model: string; tweaks: string[] } | null
   /** The Redo note as typed. */
   note: string
   error: string
@@ -62,6 +64,6 @@ export type Run = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'improve-prompt': { run: Shaped<Run | null>; lastId: number }
+    'improve-prompt': { run: Shaped<Run | null>; lastId: number; permissionMode: string }
   }
 }
