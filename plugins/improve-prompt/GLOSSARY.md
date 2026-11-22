@@ -21,7 +21,7 @@ One answer the person can pick for a Clarifying question. They can also type the
 _Avoid_: Choice, chip
 
 **Recommended answer**:
-The Option the mod proposes for a Clarifying question. It is always listed first.
+The Option the mod proposes for a Clarifying question. It is always listed first, marked as recommended, and starts out picked until the person picks another, types their own, or skips.
 _Avoid_: Default, suggestion
 
 **Round**:

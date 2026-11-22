@@ -260,3 +260,36 @@ test('a pane that cannot open leaves no run behind', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /Run \/improve-prompt to start/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('each question starts with its Recommended answer picked and marked', async ($, on) => {
+  const { ui } = await start($, on, { fork: [answered(ROUND_ONE)] })
+
+  expect((await ui.find({ key: 'pick-0-0' }))?.text).toContain('●  In settings  · recommended')
+  expect((await ui.find({ key: 'pick-0-1' }))?.text).toContain('○  In the header')
+  expect((await ui.find({ key: 'pick-0-1' }))?.text).not.toContain('recommended')
+  // Every question already has an answer, so Continue shows from the start.
+  expect(await ui.find({ key: 'next' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('0 of 2')
+  await ui.unmount()
+})
+
+test('a question left untouched sends its Recommended answer', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(WRITTEN)] })
+
+  await ui.press({ key: 'pick-0-1' })
+  await ui.press({ key: 'write-now' })
+  expect(seen.fork[1]).toContain('Answer: In the header')
+  expect(seen.fork[1]).toContain('Answer: Follow the system')
+  expect(seen.fork[1]).not.toContain('Skipped')
+  await ui.unmount()
+})
+
+test('change reopens a question with its Recommended answer picked again', async ($, on) => {
+  const { ui } = await start($, on, { fork: [answered(ROUND_ONE)] })
+
+  await ui.press({ key: 'skip-0' })
+  expect(await ui.find({ type: 'Text', text: /^Skipped$/ })).toBeDefined()
+  await ui.press({ key: 'change-0' })
+  expect((await ui.find({ key: 'pick-0-0' }))?.text).toContain('●  In settings')
+  await ui.unmount()
+})
