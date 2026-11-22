@@ -13,6 +13,8 @@ import {
   redoPrompt,
   writePrompt,
 } from './prompts'
+import { loadTuning } from './tuning'
+import type { Tuning } from './tuning'
 
 const PANE = 'improve-prompt'
 // The model used when the run does not read the session.
@@ -28,11 +30,14 @@ const DOING: Record<Call, string> = {
 // Change the tag when Run's fields change: a value an earlier version stored
 // is then read as no run at all.
 const runState = atom({ plugin: 'improve-prompt', key: 'run' } as const, null as Run | null, {
-  shape: 'run-3',
+  shape: 'run-4',
 })
 // Run ids never repeat, even after a close clears the run: a model call still
 // out from a closed run must not match the next one.
 const lastId = atom({ plugin: 'improve-prompt', key: 'lastId' } as const, 0)
+// The permission mode the last prompt was sent in. Only `opusplan` needs it,
+// to tell whether the session is on Opus (plan mode) or on Sonnet.
+const permissionMode = atom({ plugin: 'improve-prompt', key: 'permissionMode' } as const, '')
 
 type $ = EngineInterface
 /** A change folded into the patch that starts a model call. */
@@ -52,6 +57,8 @@ function newRun(id: number, seed: string, useContext: boolean): Run {
     answered: [],
     refined: '',
     added: [],
+    tunedFor: '',
+    tweaks: [],
     note: '',
     error: '',
     notice: '',
@@ -144,15 +151,31 @@ async function askRound($: $, id: number, from: Phase, prep: Prep = same): Promi
 
 const BUILD = { write: writePrompt, redo: redoPrompt }
 
+/** The Tuning for the session's model now, or none. Read at each write, so a `/model` switch counts. */
+async function tuningNow($: $): Promise<Tuning | undefined> {
+  return loadTuning($, (await read($, permissionMode)) === 'plan')
+}
+
 /** Writes the Refined prompt, or rewrites it from the Redo note. */
 async function rewrite($: $, id: number, call: 'write' | 'redo', from: Phase, prep: Prep = same): Promise<void> {
   const run = await begin($, id, call, from, prep)
   if (!run) return
-  const answer = await callModel($, run, BUILD[call])
+  const tuning = await tuningNow($)
+  const answer = await callModel($, run, (r, withContext) => BUILD[call](r, withContext, tuning))
   if (!answer.isOk) return fail($, id, answer.error)
-  const { refined, added } = parseRefined(answer.text)
+  const { refined, added, tweaks } = parseRefined(answer.text)
   if (!refined) return fail($, id, 'Claude replied with an empty prompt.')
-  await patch($, id, r => ({ ...r, phase: 'result', refined, added, note: '' }))
+  // Tweaks only count when a Model reference was sent to be applied.
+  const kept = tuning ? tweaks : []
+  await patch($, id, r => ({
+    ...r,
+    phase: 'result',
+    refined,
+    added,
+    tunedFor: kept.length > 0 && tuning ? tuning.model : '',
+    tweaks: kept,
+    note: '',
+  }))
 }
 
 /**
@@ -293,6 +316,12 @@ export const register: Register = (on, options) => {
     })
     return next(e)
   })
+
+  // Remember the mode each prompt was sent in. The hook only watches.
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    await update($, permissionMode, () => e.permission_mode ?? '')
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'improve-prompt' }, async ($, e) => {
     const seed = e.args.trim()
@@ -454,6 +483,11 @@ export const register: Register = (on, options) => {
                 {run.added.length} {run.added.length === 1 ? 'detail' : 'details'} added
               </Text>
             )}
+            {run.tweaks.length > 0 && (
+              <Text color="success">
+                {run.tweaks.length} model {run.tweaks.length === 1 ? 'tweak' : 'tweaks'}
+              </Text>
+            )}
           </Box>
           <Box flexDirection="row" flexWrap="wrap" columnGap={3}>
             <Button
@@ -474,6 +508,17 @@ export const register: Register = (on, options) => {
               {run.added.map((line, i) => (
                 <Box key={`added-${i}`} flexDirection="row" columnGap={1}>
                   <Text color="success">+</Text>
+                  <Text>{line}</Text>
+                </Box>
+              ))}
+            </Box>
+          )}
+          {run.tweaks.length > 0 && (
+            <Box flexDirection="column">
+              <Text dimColor>TUNED FOR {run.tunedFor.toUpperCase()}</Text>
+              {run.tweaks.map((line, i) => (
+                <Box key={`tweak-${i}`} flexDirection="row" columnGap={1}>
+                  <Text color="success">~</Text>
                   <Text>{line}</Text>
                 </Box>
               ))}

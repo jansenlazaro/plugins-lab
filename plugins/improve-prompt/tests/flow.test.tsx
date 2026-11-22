@@ -50,8 +50,19 @@ function run($: Engine, args: string) {
  * Stands in for the engine: answers the mod's calls on `$` and records the
  * prompts each model call was sent and what reached the prompt box.
  */
-function engine(on: On, replies: { fork?: (ModelForkResult | Promise<ModelForkResult>)[]; complete?: ModelCompleteResult[] }) {
-  const seen = { fork: [] as string[], complete: [] as { model: string; prompt: string }[], filled: [] as string[], submitted: [] as string[], copied: [] as string[], closed: 0 }
+type Setup = {
+  /** The session's model, as `$.session.model()` answers. Not one with a reference by default. */
+  model?: string
+  /** False makes every read of a reference doc fail. */
+  docs?: boolean
+}
+
+function engine(
+  on: On,
+  replies: { fork?: (ModelForkResult | Promise<ModelForkResult>)[]; complete?: ModelCompleteResult[] },
+  setup: Setup = {},
+) {
+  const seen = { model: setup.model ?? 'claude-opus-4-6', reads: [] as string[], fork: [] as string[], complete: [] as { model: string; prompt: string }[], filled: [] as string[], submitted: [] as string[], copied: [] as string[], closed: 0 }
   on('command.register', () => ({ value: { command: 'improve-prompt' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -65,6 +76,13 @@ function engine(on: On, replies: { fork?: (ModelForkResult | Promise<ModelForkRe
     return { value: { isCopied: true } }
   })
   on('ui.toast', () => ({ value: undefined }))
+  on('session.model', () => ({ value: seen.model }))
+  // Each reference doc answers with its own file name, so a prompt shows which were read.
+  on('fs.read', (_, e) => {
+    seen.reads.push(e.path)
+    if (setup.docs === false) throw new Error('no such file')
+    return { value: `RULES-FROM-${e.path.split('/').pop()}` }
+  })
   on('model.fork', async (_, e) => {
     seen.fork.push(e.prompt)
     return { value: await (replies.fork?.shift() ?? answered(DONE)) }
@@ -91,9 +109,9 @@ async function start(
   $: Engine,
   on: On,
   replies: Parameters<typeof engine>[1],
-  { surface = 'terminal', seed = 'add dark mode' }: { surface?: Surface; seed?: string } = {},
+  { surface = 'terminal', seed = 'add dark mode', ...setup }: { surface?: Surface; seed?: string } & Setup = {},
 ) {
-  const seen = engine(on, replies)
+  const seen = engine(on, replies, setup)
   await $.session.start({ cwd: '/', surface, isInteractive: true })
   await run($, seed)
   const ui = await $.ui.mount({ ...PANE, surface })
@@ -336,5 +354,133 @@ test('change reopens a question with its Recommended answer picked again', async
   expect(await ui.find({ type: 'Text', text: /^Skipped$/ })).toBeDefined()
   await ui.press({ key: 'change-0' })
   expect((await ui.find({ key: 'pick-0-0' }))?.text).toContain('●  In settings')
+
+// ----- tuning for the session model -----
+
+const TUNED = `${REFINED}\n===ADDED===\n- Put the toggle in settings\n===TUNED===\n- Asked for a real check before it reports done, because Sonnet 5.5 sometimes skips one\n- Said what is out of scope, because it adds unrequested extras`
+
+/** Gets from the first question to the Review step. */
+async function review(ui: Awaited<ReturnType<typeof start>>['ui']) {
+  await ui.press({ key: 'write-now' })
+}
+
+test('tuning: only the session model\'s docs are read, and only for writing', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(TUNED)] }, { model: 'claude-sonnet-5-5[1m]' })
+
+  // The questions are asked before any doc is read.
+  expect(seen.reads).toEqual([])
+  expect(seen.fork[0]).not.toContain('RULES-FROM')
+
+  await review(ui)
+  const root = seen.reads[0]?.replace(/\/references\/.*$/, '') ?? ''
+  expect(root).not.toBe('')
+  expect(seen.reads).toEqual([`${root}/references/general.md`, `${root}/references/sonnet-5-5.md`])
+  expect(seen.fork[1]).toContain('<model_rules for="Claude Sonnet 5.5">')
+  expect(seen.fork[1]).toContain('RULES-FROM-general.md')
+  expect(seen.fork[1]).toContain('RULES-FROM-sonnet-5-5.md')
+  expect(seen.fork[1]).not.toContain('opus')
+  await ui.unmount()
+})
+
+test('tuning: the tweak list shows each tweak and stays out of the prompt', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(TUNED)] }, { model: 'claude-sonnet-5-5' })
+
+  await review(ui)
+  expect(await ui.find({ type: 'Text', text: /TUNED FOR CLAUDE SONNET 5\.5/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /2 model tweaks/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /real check before it reports done, because Sonnet 5.5 sometimes skips one/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Said what is out of scope/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /===TUNED===/ })).toBeUndefined()
+
+  await ui.press({ key: 'send' })
+  expect(seen.submitted).toEqual([REFINED])
+  await ui.unmount()
+})
+
+for (const model of ['claude-opus-4-6', 'claude-opus-5', 'some-model', '']) {
+  test(`tuning: "${model}" has no reference, so nothing is read, said or changed`, async ($, on) => {
+    const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(WRITTEN)] }, { model })
+
+    await review(ui)
+    expect(seen.reads).toEqual([])
+    expect(seen.fork[1]).not.toContain('model_rules')
+    expect(seen.fork[1]).not.toContain('TUNED')
+    expect(await ui.find({ type: 'Text', text: /dark mode toggle/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /tuned|tweak|model rules/i })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /2 details added/ })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('tuning: a model with no reference ignores a tweak list the reply holds anyway', async ($, on) => {
+  const { ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(TUNED)] }, { model: 'claude-opus-4-6' })
+
+  await review(ui)
+  expect(await ui.find({ type: 'Text', text: /dark mode toggle/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /tweak|tuned/i })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('tuning: a doc that cannot be read falls back silently and the run reaches Review', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(WRITTEN)] }, { model: 'claude-opus-5-5', docs: false })
+
+  await review(ui)
+  expect(seen.reads.length).toBeGreaterThan(0)
+  expect(seen.fork[1]).not.toContain('model_rules')
+  expect(await ui.find({ type: 'Text', text: /dark mode toggle/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Something went wrong/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /tuned|tweak|couldn.t/i })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('tuning: with a reference but no tweaks, nothing about tuning is shown', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(WRITTEN)] }, { model: 'claude-haiku-5-5' })
+
+  await review(ui)
+  expect(seen.fork[1]).toContain('<model_rules for="Claude Haiku 5.5">')
+  expect(await ui.find({ type: 'Text', text: /dark mode toggle/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /TUNED FOR|model tweak/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('tuning: opusplan outside plan mode reads the Sonnet doc', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(TUNED)] }, { model: 'opusplan' })
+  await review(ui)
+  expect(seen.reads.map(path => path.split('/').pop())).toEqual(['general.md', 'sonnet-5-5.md'])
+  await ui.unmount()
+})
+
+test('tuning: opusplan in plan mode reads the Opus doc', async ($, on) => {
+  const seen = engine(on, { fork: [answered(ROUND_ONE), answered(TUNED)] }, { model: 'opusplan' })
+  on('classic.UserPromptSubmit', () => ({ value: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.classic.UserPromptSubmit({ prompt: 'plan the work', permission_mode: 'plan' })
+  await run($, 'add dark mode')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'write-now' })
+  expect(seen.reads.map(path => path.split('/').pop())).toEqual(['general.md', 'opus-5-5.md'])
+  expect(await ui.find({ type: 'Text', text: /TUNED FOR CLAUDE OPUS 5\.5/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('tuning: a rewrite reads the model again and replaces the tweak list', async ($, on) => {
+  const second = `${REFINED} Keep it short.\n===TUNED===\n- Cut the prompt down, because Haiku 5.5 does best with short prompts`
+  const { seen, ui } = await start(
+    $,
+    on,
+    { fork: [answered(ROUND_ONE), answered(TUNED), answered(second)] },
+    { model: 'claude-sonnet-5-5' },
+  )
+
+  await review(ui)
+  expect(await ui.find({ type: 'Text', text: /TUNED FOR CLAUDE SONNET 5\.5/ })).toBeDefined()
+
+  seen.model = 'claude-haiku-5-5'
+  await ui.input({ key: 'note', text: 'shorter' })
+  expect(seen.reads.map(path => path.split('/').pop())).toEqual(['general.md', 'sonnet-5-5.md', 'general.md', 'haiku-5-5.md'])
+  expect(seen.fork[2]).toContain('<model_rules for="Claude Haiku 5.5">')
+  expect(await ui.find({ type: 'Text', text: /TUNED FOR CLAUDE HAIKU 5\.5/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Cut the prompt down/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Said what is out of scope/ })).toBeUndefined()
   await ui.unmount()
 })

@@ -51,3 +51,19 @@ _Avoid_: Session, attempt
 **Session context**:
 The current conversation, which the mod can read to ask sharper questions. The person can turn it off.
 _Avoid_: History, transcript
+
+**Session model**:
+The model the current conversation runs on, as `/model` shows it. The mod reads it each time it writes or rewrites a Refined prompt, so a switch between two writes counts. Under `opusplan` it means Opus in plan mode and Sonnet otherwise.
+_Avoid_: Current model, active model
+
+**Model reference**:
+A doc under `references/` holding condensed rules, each with a link to its source section, for writing prompts for one model. One shared general doc holds the rules every model shares and is read only together with a model's own.
+_Avoid_: Guide, model doc
+
+**Reference map**:
+`references/map.ts`: the list that says which Model reference goes with which Session model. A Session model it does not list gets no tuning.
+_Avoid_: Registry, index
+
+**Tweak**:
+One line in the "Tuned for" list, naming a change the Refined prompt got because of a rule in the Model reference, and the rule behind it. Shown only when the Session model has a Model reference.
+_Avoid_: Change, adjustment, Addition

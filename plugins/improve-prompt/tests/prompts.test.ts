@@ -33,3 +33,36 @@ for (const mark of ['===ADDED===', '=== Added ===', '## Added', '## What I added
     expect(added).toEqual(['One', 'Two'])
   })
 }
+
+for (const mark of ['===TUNED===', '=== Tuned ===', '## Tuned for Claude Opus 5.5', 'Tweaks:']) {
+  test(`refined: "${mark}" splits off the list of tweaks`, () => {
+    const { refined, added, tweaks } = parseRefined(`Do the thing.\n===ADDED===\n- One\n${mark}\n- Ran a real check, because it skips them\n* Two`)
+    expect(refined).toBe('Do the thing.')
+    expect(added).toEqual(['One'])
+    expect(tweaks).toEqual(['Ran a real check, because it skips them', 'Two'])
+  })
+}
+
+test('refined: a tweak list with no list of additions is still read', () => {
+  const { refined, added, tweaks } = parseRefined('Do the thing.\n===TUNED===\n- Asked for a check')
+  expect(refined).toBe('Do the thing.')
+  expect(added).toEqual([])
+  expect(tweaks).toEqual(['Asked for a check'])
+})
+
+test('refined: lists written in the other order are each kept to their own', () => {
+  const { refined, added, tweaks } = parseRefined('Do the thing.\n===TUNED===\n- T1\n===ADDED===\n- A1')
+  expect(refined).toBe('Do the thing.')
+  expect(added).toEqual(['A1'])
+  expect(tweaks).toEqual(['T1'])
+})
+
+test('refined: a reply with no tweak list has no tweaks', () => {
+  expect(parseRefined('Do the thing.\n===ADDED===\n- One').tweaks).toEqual([])
+  expect(parseRefined('Do the thing.').tweaks).toEqual([])
+})
+
+test('refined: at most eight tweaks are kept', () => {
+  const lines = Array.from({ length: 12 }, (_, i) => `- T${i}`).join('\n')
+  expect(parseRefined(`Do it.\n===TUNED===\n${lines}`).tweaks.length).toBe(8)
+})

@@ -3,11 +3,13 @@
 // of open decisions, a recommended answer for each, asked in Rounds.
 
 import type { Answered, Question, Run } from '../types'
+import type { Tuning } from './tuning'
 
 export const MAX_ROUNDS = 3
 const MAX_QUESTIONS = 3
 const MAX_OPTIONS = 4
 const MAX_ADDED = 6
+const MAX_TWEAKS = 8
 
 const FRAME_WITH_CONTEXT = `[This message comes from the improve-prompt mod, not from the person. Do not act on the conversation, do not call any tools, and do not start the task. The person is preparing their next prompt for you and wants help making it better. Use the conversation above as background: what they are working on, what is already known.]`
 
@@ -60,25 +62,40 @@ Reply with JSON only, no other text, in one of these two forms:
 }
 
 const ADDED_MARK = '===ADDED==='
+const TUNED_MARK = '===TUNED==='
 
-const SHAPE = `Shape: for a small, single-step ask, write a few plain, direct sentences. For a bigger task, use short labeled sections (Goal, Context, Constraints, Output, Done when), keeping only the ones that have something to say. Write it in the person's voice, addressed to Claude, the way they would type it. Make it as short as it can be while still complete.
+const SHAPE = `Shape: for a small, single-step ask, write a few plain, direct sentences. For a bigger task, use short labeled sections (Goal, Context, Constraints, Output, Done when), keeping only the ones that have something to say. Write it in the person's voice, addressed to Claude, the way they would type it. Make it as short as it can be while still complete.`
 
-Reply with the prompt text first: no preamble, no code fence, no commentary. Then a line holding only ${ADDED_MARK}, then up to ${MAX_ADDED} lines, each starting with "- ", naming one thing the prompt now says that the seed did not, in at most eight words (for example "- Set the goal as more online orders").`
+const ADDED_FORMAT = `Reply with the prompt text first: no preamble, no code fence, no commentary. Then a line holding only ${ADDED_MARK}, then up to ${MAX_ADDED} lines, each starting with "- ", naming one thing the prompt now says that the seed did not, in at most eight words (for example "- Set the goal as more online orders").`
 
-export function writePrompt(run: Run, withContext: boolean): string {
+/** The shape and the reply format, with the Model reference when one applies. */
+function shape(tuning?: Tuning): string {
+  if (!tuning) return `${SHAPE}\n\n${ADDED_FORMAT}`
+  return `${SHAPE}
+
+The person will send this prompt to ${tuning.model}. The rules below say how to write for that model. Apply the ones that fit this prompt, and only those: a rule that does not fit leaves no trace in the prompt, and the prompt stays as short as it can be.
+
+<model_rules for="${tuning.model}">
+${tuning.rules}
+</model_rules>
+
+${ADDED_FORMAT} Then a line holding only ${TUNED_MARK}, then up to ${MAX_TWEAKS} lines, each starting with "- ", one for each change you made to the prompt because of a rule. Say what you changed and the rule behind it, in one sentence (for example "- Asked for a real test run before it reports done, because this model sometimes skips checks"). If no rule changed the prompt, write nothing after ${TUNED_MARK}.`
+}
+
+export function writePrompt(run: Run, withContext: boolean, tuning?: Tuning): string {
   const from = withContext ? 'the seed, the answers and the conversation' : 'the seed and the answers'
   return `${frame(withContext)}
 
 Write the refined prompt the person will send to Claude, from ${from}. Leave out what they skipped.
 
-${SHAPE}
+${shape(tuning)}
 
 ${seedBlock(run)}
 
 ${answersBlock(run.answered)}`
 }
 
-export function redoPrompt(run: Run, withContext: boolean): string {
+export function redoPrompt(run: Run, withContext: boolean, tuning?: Tuning): string {
   const note = run.note.trim()
   const change = note
     ? `<change>\n${note}\n</change>\n\nRewrite the prompt with this change.`
@@ -87,7 +104,7 @@ export function redoPrompt(run: Run, withContext: boolean): string {
 
 You wrote a refined prompt for the person from their seed and answers. ${change}
 
-${SHAPE}
+${shape(tuning)}
 
 ${seedBlock(run)}
 
@@ -169,18 +186,41 @@ function cleanPrompt(text: string): string {
 
 // The ADDED_MARK line, or a variant a model may write: "## Added", "Added:".
 const ADDED_LINE = /^\s*(?:={3,}\s*added\s*={3,}|#{1,6}\s*(?:what i )?added\b[^\n]*|added\s*:)\s*$/im
+// The TUNED_MARK line, or a variant: "## Tuned for Claude Opus 5.5", "Tweaks:".
+const TUNED_LINE = /^\s*(?:={3,}\s*tuned\s*={3,}|#{1,6}\s*(?:tuned|tweaks|model tweaks)\b[^\n]*|(?:tuned|tweaks)\s*:)\s*$/im
 
-/** Splits a write reply into the Refined prompt and the list of what it adds. */
-export function parseRefined(text: string): { refined: string; added: string[] } {
-  const mark = ADDED_LINE.exec(text)
-  if (!mark) return { refined: cleanPrompt(text), added: [] }
-  const added = text
-    .slice(mark.index + mark[0].length)
+/** The lines of a list section, without their bullets, at most `max` of them. */
+function listLines(text: string, max: number): string[] {
+  return text
     .split('\n')
     .map(line => line.replace(/^\s*[-+*•]\s*/, '').trim())
     .filter(Boolean)
-    .slice(0, MAX_ADDED)
-  return { refined: cleanPrompt(text.slice(0, mark.index)), added }
+    .slice(0, max)
+}
+
+/**
+ * Splits a write reply into the Refined prompt, the list of what it adds and
+ * the list of Tweaks. Each list ends where the next mark begins, whatever the
+ * order the model wrote them in.
+ */
+export function parseRefined(text: string): { refined: string; added: string[]; tweaks: string[] } {
+  const marks = [
+    { kind: 'added', match: ADDED_LINE.exec(text) },
+    { kind: 'tuned', match: TUNED_LINE.exec(text) },
+  ]
+    .flatMap(({ kind, match }) => (match ? [{ kind, start: match.index, end: match.index + match[0].length }] : []))
+    .sort((a, b) => a.start - b.start)
+  if (marks.length === 0) return { refined: cleanPrompt(text), added: [], tweaks: [] }
+  const section = (kind: string, max: number): string[] => {
+    const i = marks.findIndex(m => m.kind === kind)
+    const mark = marks[i]
+    return mark ? listLines(text.slice(mark.end, marks[i + 1]?.start ?? text.length), max) : []
+  }
+  return {
+    refined: cleanPrompt(text.slice(0, marks[0]?.start)),
+    added: section('added', MAX_ADDED),
+    tweaks: section('tuned', MAX_TWEAKS),
+  }
 }
 
 export function countWords(text: string): number {
