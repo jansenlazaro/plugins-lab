@@ -354,6 +354,8 @@ test('change reopens a question with its Recommended answer picked again', async
   expect(await ui.find({ type: 'Text', text: /^Skipped$/ })).toBeDefined()
   await ui.press({ key: 'change-0' })
   expect((await ui.find({ key: 'pick-0-0' }))?.text).toContain('●  In settings')
+  await ui.unmount()
+})
 
 // ----- tuning for the session model -----
 
