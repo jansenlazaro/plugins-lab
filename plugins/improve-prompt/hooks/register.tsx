@@ -17,8 +17,9 @@ import { loadTuning } from './tuning'
 import type { Tuning } from './tuning'
 
 const PANE = 'improve-prompt'
-// The model used when the run does not read the session.
-const ALONE_MODEL = 'sonnet'
+// The model and effort used when the run does not read the session.
+const ALONE_MODEL = 'opus'
+const ALONE_EFFORT = 'low'
 const NO_CONVERSATION = 'No conversation yet, so this run works from your text alone.'
 const STEPS = ['Your prompt', 'Questions', 'Rewrite', 'Review'] as const
 const DOING: Record<Call, string> = {
@@ -105,8 +106,10 @@ async function callModel($: $, run: Run, build: (run: Run, withContext: boolean)
   }
   const done = await $.model.complete({
     model: ALONE_MODEL,
+    effort: ALONE_EFFORT,
     prompt: build(run, false),
-    maxTokens: 4000,
+    // Thinking counts toward the cap, so leave room for it.
+    maxTokens: 8000,
     timeoutMs: 180_000,
   })
   return done.isAnswered ? { isOk: true, text: done.text } : { isOk: false, error: whyNot(done) }

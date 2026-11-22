@@ -43,7 +43,7 @@ Only the docs for your model are read. The questions are never tuned, only the w
 
 ## Session context
 
-By default the questions and the refined prompt draw on the current conversation, so Claude knows what you're working on. Those calls reuse the conversation on your session's model. Turn it off for one run with the toggle in the pane, or for every run with the plugin's **Use session context** setting in `/config`. With context off, or before the conversation has started, the mod uses Sonnet and sees only your text and answers.
+By default the questions and the refined prompt draw on the current conversation, so Claude knows what you're working on. Those calls reuse the conversation on your session's model. Turn it off for one run with the toggle in the pane, or for every run with the plugin's **Use session context** setting in `/config`. With context off, or before the conversation has started, the mod uses Opus at low effort and sees only your text and answers.
 
 ## Install
 

@@ -62,7 +62,7 @@ function engine(
   replies: { fork?: (ModelForkResult | Promise<ModelForkResult>)[]; complete?: ModelCompleteResult[] },
   setup: Setup = {},
 ) {
-  const seen = { model: setup.model ?? 'claude-opus-4-6', reads: [] as string[], fork: [] as string[], complete: [] as { model: string; prompt: string }[], filled: [] as string[], submitted: [] as string[], copied: [] as string[], closed: 0 }
+  const seen = { model: setup.model ?? 'claude-opus-4-6', reads: [] as string[], fork: [] as string[], complete: [] as { model: string; effort?: string; prompt: string }[], filled: [] as string[], submitted: [] as string[], copied: [] as string[], closed: 0 }
   on('command.register', () => ({ value: { command: 'improve-prompt' } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -88,7 +88,7 @@ function engine(
     return { value: await (replies.fork?.shift() ?? answered(DONE)) }
   })
   on('model.complete', (_, e) => {
-    seen.complete.push({ model: e.model, prompt: e.prompt })
+    seen.complete.push({ model: e.model, effort: e.effort, prompt: e.prompt })
     return { value: replies.complete?.shift() ?? answered(DONE) }
   })
   on('prompt.fill', (_, e) => {
@@ -195,22 +195,24 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
-test('with session context off it uses Sonnet and never the session', { options: { useSessionContext: false } }, async ($, on) => {
+test('with session context off it uses Opus at low effort and never the session', { options: { useSessionContext: false } }, async ($, on) => {
   const { seen, ui } = await start($, on, { complete: [answered(ROUND_ONE), answered(WRITTEN)] })
 
   expect((await ui.find({ key: 'context' }))?.text).toContain('[ ] Use session context')
   await ui.press({ key: 'write-now' })
   expect(seen.fork).toEqual([])
-  expect(seen.complete.map(c => c.model)).toEqual(['sonnet', 'sonnet'])
+  expect(seen.complete.map(c => c.model)).toEqual(['opus', 'opus'])
+  expect(seen.complete.map(c => c.effort)).toEqual(['low', 'low'])
   expect(seen.complete[0]?.prompt).toContain('add dark mode')
   await ui.unmount()
 })
 
-test('with no conversation yet it falls back to Sonnet and says so', async ($, on) => {
+test('with no conversation yet it falls back to Opus at low effort and says so', async ($, on) => {
   const nothing: ModelForkResult = { isAnswered: false, reason: 'nothing-to-fork', usage: USAGE } as ModelForkResult
   const { seen, ui } = await start($, on, { fork: [nothing], complete: [answered(ROUND_ONE)] })
 
-  expect(seen.complete.map(c => c.model)).toEqual(['sonnet'])
+  expect(seen.complete.map(c => c.model)).toEqual(['opus'])
+  expect(seen.complete.map(c => c.effort)).toEqual(['low'])
   expect(await ui.find({ type: 'Text', text: /No conversation yet/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /A FEW QUICK QUESTIONS/ })).toBeDefined()
   await ui.unmount()
