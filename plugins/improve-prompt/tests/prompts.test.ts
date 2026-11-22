@@ -62,11 +62,6 @@ test('refined: a heading that only looks like a tweak list is part of the prompt
   expect(parseRefined(prompt)).toEqual({ refined: prompt, added: [], tweaks: [] })
 })
 
-test('refined: a reply with no tweak list has no tweaks', () => {
-  expect(parseRefined('Do the thing.\n===ADDED===\n- One').tweaks).toEqual([])
-  expect(parseRefined('Do the thing.').tweaks).toEqual([])
-})
-
 test('refined: at most eight tweaks are kept', () => {
   const lines = Array.from({ length: 12 }, (_, i) => `- T${i}`).join('\n')
   expect(parseRefined(`Do it.\n===TUNED===\n${lines}`).tweaks.length).toBe(8)

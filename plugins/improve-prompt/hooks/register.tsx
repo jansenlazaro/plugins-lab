@@ -150,16 +150,12 @@ async function askRound($: $, id: number, from: Phase, prep: Prep = same): Promi
 
 const BUILD = { write: writePrompt, redo: redoPrompt }
 
-/** The Tuning for the session's model now, or none. Read at each write, so a `/model` switch counts. */
-async function tuningNow($: $): Promise<Tuning | undefined> {
-  return loadTuning($, (await read($, permissionMode)) === 'plan')
-}
-
 /** Writes the Refined prompt, or rewrites it from the Redo note. */
 async function rewrite($: $, id: number, call: 'write' | 'redo', from: Phase, prep: Prep = same): Promise<void> {
   const run = await begin($, id, call, from, prep)
   if (!run) return
-  const tuning = await tuningNow($)
+  // Read at each write, so a `/model` switch counts.
+  const tuning = await loadTuning($, (await read($, permissionMode)) === 'plan')
   const answer = await callModel($, run, (r, withContext) => BUILD[call](r, withContext, tuning))
   if (!answer.isOk) return fail($, id, answer.error)
   const { refined, added, tweaks } = parseRefined(answer.text)
