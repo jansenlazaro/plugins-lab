@@ -1,0 +1,15 @@
+{
+  "name": "improve-prompt",
+  "version": "1.0.0",
+  "description": "/improve-prompt opens a pane that asks a few rounds of clarifying questions, then writes you a better prompt.",
+  "author": { "name": "Jansen Lazaro" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "useSessionContext": {
+      "type": "boolean",
+      "title": "Use session context",
+      "description": "Let the questions and the refined prompt draw on the current conversation. Each run can still switch it in the pane.",
+      "default": true
+    }
+  }
+}

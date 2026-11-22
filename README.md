@@ -29,11 +29,11 @@ In the desktop app: click **+** next to the prompt box, then **Plugins** → **A
 
 ## Plugins
 
-None yet. Each plugin lives in [`plugins/`](plugins/) and is listed in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
+Each plugin lives in [`plugins/`](plugins/) and is listed in [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json).
 
 | Plugin | What it does |
 | --- | --- |
-| _coming soon_ | |
+| [`improve-prompt`](plugins/improve-prompt/) | Mod. `/improve-prompt <rough prompt or goal>` opens a pane that asks a few rounds of clarifying questions, then writes a better prompt you can put in the prompt box or send. |
 
 ## Add a plugin
 

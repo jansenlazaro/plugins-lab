@@ -1,0 +1,262 @@
+import { expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
+import type { ModelCompleteResult, ModelForkResult, On } from 'claude-code'
+
+const USAGE = {
+  input_tokens: 1,
+  output_tokens: 1,
+  cache_read_input_tokens: 0,
+  cache_creation_input_tokens: 0,
+}
+
+const PANE = {
+  plugin: 'improve-prompt',
+  component: 'Pane',
+  requestId: 'improve-prompt',
+  props: {
+    title: 'Improve prompt',
+    isFocused: true,
+    bodyColumns: 60,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 40 },
+    view: {},
+  },
+} as const
+
+const ROUND_ONE = JSON.stringify({
+  done: false,
+  questions: [
+    { question: 'Where should the toggle live, the settings page?', options: ['In settings', 'In the header'] },
+    { question: 'Which theme should it start in?', options: ['Follow the system', 'Light', 'Dark'] },
+  ],
+})
+const DONE = JSON.stringify({ done: true })
+const REFINED = 'Add a dark mode toggle to the settings page. Follow the system theme by default.'
+const WRITTEN = `${REFINED}\n===ADDED===\n- Put the toggle in settings\n- Follow the system theme`
+
+const answered = (text: string): ModelCompleteResult => ({ isAnswered: true, text, usage: USAGE })
+
+/** Runs `/improve-prompt <args>` as the person typing it would. */
+function run($: Engine, args: string) {
+  return $.command.run({
+    command: 'improve-prompt',
+    args,
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: true, columns: 160 },
+  })
+}
+
+/**
+ * Stands in for the engine: answers the mod's calls on `$` and records the
+ * prompts each model call was sent and what reached the prompt box.
+ */
+function engine(on: On, replies: { fork?: (ModelForkResult | Promise<ModelForkResult>)[]; complete?: ModelCompleteResult[] }) {
+  const seen = { fork: [] as string[], complete: [] as { model: string; prompt: string }[], filled: [] as string[], submitted: [] as string[], copied: [] as string[], closed: 0 }
+  on('command.register', () => ({ value: { command: 'improve-prompt' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.focus', () => ({}))
+  on('ui.close', () => {
+    seen.closed += 1
+    return { value: undefined }
+  })
+  on('ui.copy', (_, e) => {
+    seen.copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  on('model.fork', async (_, e) => {
+    seen.fork.push(e.prompt)
+    return { value: await (replies.fork?.shift() ?? answered(DONE)) }
+  })
+  on('model.complete', (_, e) => {
+    seen.complete.push({ model: e.model, prompt: e.prompt })
+    return { value: replies.complete?.shift() ?? answered(DONE) }
+  })
+  on('prompt.fill', (_, e) => {
+    seen.filled.push(e.text)
+    return { isFilled: true, text: e.text, cursor: e.text.length }
+  })
+  on('prompt.submit', (_, e) => {
+    seen.submitted.push(e.text)
+    return { text: e.text }
+  })
+  return seen
+}
+
+type Surface = 'terminal' | 'desktop'
+
+/** Starts a session, runs the command and mounts the pane. */
+async function start(
+  $: Engine,
+  on: On,
+  replies: Parameters<typeof engine>[1],
+  { surface = 'terminal', seed = 'add dark mode' }: { surface?: Surface; seed?: string } = {},
+) {
+  const seen = engine(on, replies)
+  await $.session.start({ cwd: '/', surface, isInteractive: true })
+  await run($, seed)
+  const ui = await $.ui.mount({ ...PANE, surface })
+  return { seen, ui }
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`seed, a round, the refined prompt, then the prompt box (${surface})`, async ($, on) => {
+    const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(DONE), answered(WRITTEN)] }, { surface })
+
+    expect(await ui.find({ type: 'Text', text: /A FEW QUICK QUESTIONS/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Round 1 of up to 3/ })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('0 of 2')
+    expect(await ui.find({ type: 'Text', text: /settings page/ })).toBeDefined()
+    expect(seen.fork[0]).toContain('add dark mode')
+
+    // The first answer is typed under "Other", the second picked.
+    await ui.press({ key: 'other-0' })
+    await ui.input({ key: 'answer-0', text: 'In the sidebar.' })
+    await ui.press({ key: 'pick-1-0' })
+    expect((await ui.find({ type: 'Text', text: /of 2 answered/ }))?.text).toContain('2 of 2')
+    await ui.press({ key: 'next' })
+
+    expect(seen.fork[1]).toContain('Answer: In the sidebar.')
+    expect(seen.fork[1]).toContain('Answer: Follow the system')
+    expect(await ui.find({ type: 'Text', text: /dark mode toggle/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /2 details added/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Put the toggle in settings/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /===ADDED===/ })).toBeUndefined()
+
+    await ui.press({ key: 'copy' })
+    expect(seen.copied).toEqual([REFINED])
+
+    await ui.press({ key: 'fill' })
+    expect(seen.filled).toEqual([REFINED])
+    expect(seen.closed).toBe(1)
+    expect(seen.complete).toEqual([])
+    await ui.unmount()
+  })
+
+  test(`"Write it now" ends the rounds early (${surface})`, async ($, on) => {
+    const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(WRITTEN)] }, { surface })
+
+    await ui.press({ key: 'write-now' })
+    expect(seen.fork.length).toBe(2)
+    expect(seen.fork[1]).toContain('Write the refined prompt')
+
+    await ui.press({ key: 'send' })
+    expect(seen.submitted).toEqual([REFINED])
+    expect(seen.filled).toEqual([])
+    await ui.unmount()
+  })
+
+  test(`Skip leaves a question out (${surface})`, async ($, on) => {
+    const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(WRITTEN)] }, { surface })
+
+    await ui.press({ key: 'skip-1' })
+    expect(await ui.find({ type: 'Text', text: /^Skipped$/ })).toBeDefined()
+    await ui.press({ key: 'write-now' })
+    expect(seen.fork[1]).toContain('Skipped: leave this out of the prompt.')
+    await ui.unmount()
+  })
+
+  test(`a failed call keeps the answers and Retry tries again (${surface})`, async ($, on) => {
+    const failed: ModelForkResult = { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: USAGE } as ModelForkResult
+    const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), failed, answered(WRITTEN)] }, { surface })
+
+    await ui.press({ key: 'other-0' })
+    await ui.input({ key: 'answer-0', text: 'In the header.', kind: 'change' })
+    await ui.press({ key: 'write-now' })
+    expect(await ui.find({ type: 'Text', text: /Something went wrong/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /529/ })).toBeDefined()
+
+    await ui.press({ key: 'retry' })
+    expect(seen.fork.length).toBe(3)
+    expect(seen.fork[2]).toContain('In the header.')
+    expect(await ui.find({ type: 'Text', text: /dark mode toggle/ })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('with session context off it uses Sonnet and never the session', { options: { useSessionContext: false } }, async ($, on) => {
+  const { seen, ui } = await start($, on, { complete: [answered(ROUND_ONE), answered(WRITTEN)] })
+
+  expect((await ui.find({ key: 'context' }))?.text).toContain('[ ] Use session context')
+  await ui.press({ key: 'write-now' })
+  expect(seen.fork).toEqual([])
+  expect(seen.complete.map(c => c.model)).toEqual(['sonnet', 'sonnet'])
+  expect(seen.complete[0]?.prompt).toContain('add dark mode')
+  await ui.unmount()
+})
+
+test('with no conversation yet it falls back to Sonnet and says so', async ($, on) => {
+  const nothing: ModelForkResult = { isAnswered: false, reason: 'nothing-to-fork', usage: USAGE } as ModelForkResult
+  const { seen, ui } = await start($, on, { fork: [nothing], complete: [answered(ROUND_ONE)] })
+
+  expect(seen.complete.map(c => c.model)).toEqual(['sonnet'])
+  expect(await ui.find({ type: 'Text', text: /No conversation yet/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /A FEW QUICK QUESTIONS/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('with no seed it asks what to do first', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE)] }, { seed: '' })
+
+  expect(await ui.find({ type: 'Text', text: /What do you want Claude to do/ })).toBeDefined()
+  expect(seen.fork).toEqual([])
+  await ui.input({ key: 'seed', text: 'add dark mode' })
+  expect(seen.fork[0]).toContain('add dark mode')
+  expect(await ui.find({ type: 'Text', text: /A FEW QUICK QUESTIONS/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('each round shows its number, and the third round writes the prompt', async ($, on) => {
+  const { seen, ui } = await start($, on, { fork: [answered(ROUND_ONE), answered(ROUND_ONE), answered(ROUND_ONE), answered(WRITTEN)] })
+
+  for (const round of [1, 2, 3]) {
+    expect((await ui.find({ type: 'Text', text: /Round \d of up to 3/ }))?.text).toContain(`Round ${round} of up to 3`)
+    await ui.press({ key: 'pick-0-0' })
+    await ui.press({ key: 'pick-1-0' })
+    await ui.press({ key: 'next' })
+  }
+
+  // No fourth round is asked for: the fourth call writes the prompt.
+  expect(seen.fork.length).toBe(4)
+  expect(seen.fork[3]).toContain('Write the refined prompt')
+  expect(await ui.find({ type: 'Text', text: /dark mode toggle/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a reply that comes back after Cancel never reaches the next run', async ($, on) => {
+  let release!: (reply: ModelForkResult) => void
+  const late = new Promise<ModelForkResult>(resolve => (release = resolve))
+  const roundTwo = JSON.stringify({ done: false, questions: [{ question: 'Who is it for?', options: ['Me', 'My team'] }] })
+  const clock = mock.clock(on)
+  const { seen, ui } = await start($, on, { fork: [late, answered(roundTwo)] })
+
+  await ui.press({ key: 'cancel' })
+  await run($, 'write release notes')
+  release(answered(ROUND_ONE))
+  await clock.settle()
+
+  expect(seen.fork.length).toBe(2)
+  expect(await ui.find({ type: 'Text', text: /Who is it for/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /settings page/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Round 1 of up to 3/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a pane that cannot open leaves no run behind', async ($, on) => {
+  on('command.register', () => ({ value: { command: 'improve-prompt' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no-room' } }))
+  const seen: string[] = []
+  on('model.fork', (_, e) => {
+    seen.push(e.prompt)
+    return { value: answered(DONE) }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const result = await run($, 'add dark mode')
+  expect(JSON.stringify(result)).toContain("couldn't open")
+  expect(seen).toEqual([])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Run \/improve-prompt to start/ })).toBeDefined()
+  await ui.unmount()
+})
